@@ -1,88 +1,165 @@
-// Main loop
-checkGameStatus()
+// ============================================================
+// Chess.com → Lichess Analysis Extension
+//
+// On chess.com: injects a "Lichess Analysis" button. On click,
+// opens the share menu, reads the PGN, and opens lichess.org/paste.
+//
+// On lichess.org/paste: if the URL hash contains PGN data,
+// auto-fills the form and submits it.
+// ============================================================
 
-function checkGameStatus() {
-    document.arrive(".game-review-buttons-review", function() {
-        // Find chess.com analysisButton
-        var analysisButton = document.querySelector(".ui_v5-button-component.ui_v5-button-primary.ui_v5-button-full.game-review-buttons-button")
-        if (analysisButton.className == "ui_v5-button-component ui_v5-button-primary ui_v5-button-full game-review-buttons-button"){
-            Arrive.unbindAllArrive();
-            injectButton(analysisButton);
-            checkGameStatus();
-        }
-    });
-}
+(function () {
+    var host = window.location.hostname;
 
-// Injects a button similar to chess.com's native "Analysis" button 
-function injectButton(analysisButton){
-    // Duplicate the original button
-    let newButton = analysisButton.cloneNode("deep");
-    // Style it and link it to the Lichess import function.
-    newButton.childNodes[2].innerText = "Lichess Analysis";
-    newButton.style.margin = "8px 0px 0px 0px";
-    newButton.style.padding = "0px 0px 0px 0px";
-    newButton.childNodes[0].classList.remove("icon-font-chess")
-    newButton.childNodes[0].classList.add("button-class")
-    newButton.classList.add("shine-hope-anim")
-    newButton.childNodes[0].style["height"] = "3.805rem";
-    newButton.addEventListener('click', () => {
-        sendToLichess();
-    });
-    // Append back into the DOM
-    let parentNode = analysisButton.parentNode;
-    parentNode.append(newButton);
-}
-
-// Make request to Lichess through the API (fetch)
-function sendToLichess(){
-    // 1. Get PGN
-
-    // Get and click download button on chess.com
-    let downloadButton = document.getElementsByClassName("icon-font-chess share live-game-buttons-button")[0];
-    downloadButton.click();
-
-    // Wait for share tab to pop up
-    document.arrive(".share-menu-tab-pgn-textarea", function()  {
-        Arrive.unbindAllArrive();
-
-        // Get PGN from text Area
-        var PGN = document.getElementsByClassName("share-menu-tab-pgn-textarea")[0].value;
-
-        // Exit out of download view (x button)
-        document.querySelector("div.icon-font-chess.x.ui_outside-close-icon").click();
-
-        // 2. Send a POST request to Lichess to import the current game
-        let importUrl = "https://lichess.org/api/import"
-        let req = {pgn: PGN};
-        post(importUrl, req)
-            .then((response) => {
-                // Open the page on a new tab
-                let url = response["url"] ? response["url"] : "";
-                if (url) {
-                    let lichessPage = window.open(url);
-                } else alert("Could not import game");
-
-            }).catch((e) => {
-            alert("Error getting response from lichess.org");
-            throw new Error("Response error");
-        });
-    });
-}
-
-// async POST function
-async function post(url = '', data = {}) {
-    var formBody = [];
-    for (var property in data) {
-        var encodedKey = encodeURIComponent(property);
-        var encodedValue = encodeURIComponent(data[property]);
-        formBody.push(encodedKey + "=" + encodedValue);
+    if (host.includes("lichess.org")) {
+        handleLichessPaste();
+        return;
     }
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: formBody
-    });
-    return response.json();
-}
+
+    if (host.includes("chess.com") && typeof document.arrive === "function") {
+        watchForReviewButton();
+    }
+
+    // ── Lichess: auto-fill /paste form ──────────────────────
+
+    function handleLichessPaste() {
+        var hash = window.location.hash;
+        if (!hash || !hash.startsWith("#pgn=")) return;
+
+        var pgn = decodeURIComponent(hash.substring(5));
+        if (!pgn) return;
+
+        var attempts = 0;
+        var interval = setInterval(function () {
+            attempts++;
+            var textarea = document.querySelector('textarea[name="pgn"]');
+            var submit = document.querySelector("button.submit") ||
+                         document.querySelector('form button[type="submit"]') ||
+                         document.querySelector(".submit");
+
+            if (textarea && submit) {
+                clearInterval(interval);
+                var setter = Object.getOwnPropertyDescriptor(
+                    window.HTMLTextAreaElement.prototype, "value"
+                ).set;
+                setter.call(textarea, pgn);
+                textarea.dispatchEvent(new Event("input", { bubbles: true }));
+
+                var analyse = document.querySelector('input[name="analyse"]');
+                if (analyse && !analyse.checked) analyse.click();
+
+                submit.click();
+            }
+            if (attempts > 30) clearInterval(interval);
+        }, 400);
+    }
+
+    // ── Chess.com: watch for review button & inject ─────────
+
+    var MARKER = "data-lichess-injected";
+
+    function watchForReviewButton() {
+        // Current UI (2024+): button with data-cy="sidebar-game-review-button"
+        document.arrive('a[data-cy="sidebar-game-review-button"]', { existing: true }, function (reviewBtn) {
+            var container = reviewBtn.parentNode;
+            if (!container || container.getAttribute(MARKER)) return;
+            container.setAttribute(MARKER, "1");
+            Arrive.unbindAllArrive();
+            injectButton(container, reviewBtn);
+            watchForReviewButton();
+        });
+
+        // Also watch game-over modal buttons (shown right after a game ends)
+        document.arrive(".game-over-modal-buttons", { existing: true }, function (modal) {
+            if (modal.getAttribute(MARKER)) return;
+            modal.setAttribute(MARKER, "1");
+            Arrive.unbindAllArrive();
+            injectButton(modal, null);
+            watchForReviewButton();
+        });
+
+        // Legacy UI fallback
+        document.arrive(".game-review-buttons-component", { existing: true }, function (container) {
+            if (container.getAttribute(MARKER)) return;
+            var existing = container.querySelector('a[data-cy="sidebar-game-review-button"]');
+            if (existing) return; // already handled above
+            container.setAttribute(MARKER, "1");
+            Arrive.unbindAllArrive();
+            injectButton(container, null);
+            watchForReviewButton();
+        });
+    }
+
+    function injectButton(container, referenceBtn) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.id = "lichess-analysis-button";
+        btn.textContent = "Lichess Analysis";
+        btn.className = "cc-button-component cc-button-primary cc-button-xx-large cc-bg-primary cc-button-full shine-hope-anim";
+        btn.style.cssText = "margin-top:8px;cursor:pointer;border:none;width:100%;position:relative;overflow:hidden;";
+        btn.addEventListener("click", sendToLichess);
+        container.appendChild(btn);
+    }
+
+    // ── Chess.com: get PGN via share menu → open Lichess ────
+
+    function sendToLichess() {
+        var shareBtn = document.querySelector('[data-cy="sidebar-share-icon"]');
+        if (!shareBtn) {
+            alert("Could not find the share button on the page.");
+            return;
+        }
+        shareBtn.click();
+
+        waitForEl(".share-menu-tab-image-component", 8000)
+            .then(function () {
+                var tabPgn = document.getElementById("tab-pgn");
+                if (tabPgn) tabPgn.click();
+                return waitForEl(".share-menu-tab-pgn-textarea", 8000);
+            })
+            .then(function (textarea) {
+                var pgn = textarea.value;
+                closeShareMenu();
+                if (!pgn) {
+                    alert("Could not read the PGN from the game.");
+                    return;
+                }
+                window.open("https://lichess.org/paste#pgn=" + encodeURIComponent(pgn));
+            })
+            .catch(function () {
+                closeShareMenu();
+                alert("Could not open the share menu or read the PGN.");
+            });
+    }
+
+    function closeShareMenu() {
+        var close = document.querySelector('[data-cy="modal-close"]') ||
+                    document.querySelector('[aria-label="Close"]') ||
+                    document.querySelector('[aria-label="Cerrar"]') ||
+                    document.querySelector("div.icon-font-chess.x.ui_outside-close-icon");
+        if (close) close.click();
+    }
+
+    function waitForEl(selector, timeout) {
+        return new Promise(function (resolve, reject) {
+            var el = document.querySelector(selector);
+            if (el) return resolve(el);
+
+            var timer;
+            var observer = new MutationObserver(function () {
+                el = document.querySelector(selector);
+                if (el) {
+                    observer.disconnect();
+                    clearTimeout(timer);
+                    resolve(el);
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            timer = setTimeout(function () {
+                observer.disconnect();
+                reject(new Error("Timeout: " + selector));
+            }, timeout || 10000);
+        });
+    }
+})();
