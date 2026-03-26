@@ -18,6 +18,7 @@
 
     if (host.includes("chess.com") && typeof document.arrive === "function") {
         watchForReviewButton();
+        watchForMiniButton();
     }
 
     // ── Lichess: auto-fill /paste form ──────────────────────
@@ -34,8 +35,8 @@
             attempts++;
             var textarea = document.querySelector('textarea[name="pgn"]');
             var submit = document.querySelector("button.submit") ||
-                         document.querySelector('form button[type="submit"]') ||
-                         document.querySelector(".submit");
+                document.querySelector('form button[type="submit"]') ||
+                document.querySelector(".submit");
 
             if (textarea && submit) {
                 clearInterval(interval);
@@ -57,6 +58,7 @@
     // ── Chess.com: watch for review button & inject ─────────
 
     var MARKER = "data-lichess-injected";
+    var MINI_MARKER = "data-lichess-mini-injected";
 
     function watchForReviewButton() {
         // Current UI (2024+): button with data-cy="sidebar-game-review-button"
@@ -90,6 +92,16 @@
         });
     }
 
+    function watchForMiniButton() {
+        // Mini button next to the share icon in the sidebar (live game + review)
+        document.arrive('[data-cy="sidebar-share-icon"]', { existing: true }, function (shareBtn) {
+            var container = shareBtn.parentNode;
+            if (!container || container.getAttribute(MINI_MARKER)) return;
+            container.setAttribute(MINI_MARKER, "1");
+            injectMiniButton(container, shareBtn);
+        });
+    }
+
     function injectButton(container, referenceBtn) {
         var btn = document.createElement("button");
         btn.type = "button";
@@ -101,17 +113,33 @@
         container.appendChild(btn);
     }
 
+    function injectMiniButton(container, referenceBtn) {
+        var mini = document.createElement("button");
+        mini.type = "button";
+        mini.id = "lichess-mini-analysis-button";
+        mini.className = "cc-button-component cc-bg-primary shine-hope-anim button-class";
+        mini.style.cssText = "margin-left:4px;width:32px;height:32px;border-radius:16px;padding:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;border:none;position:relative;overflow:hidden;";
+        mini.setAttribute("aria-label", "Send current game to Lichess analysis");
+        mini.addEventListener("click", sendToLichess);
+
+        if (referenceBtn && referenceBtn.parentNode === container && referenceBtn.nextSibling) {
+            container.insertBefore(mini, referenceBtn.nextSibling);
+        } else {
+            container.appendChild(mini);
+        }
+    }
+
     // ── Chess.com: get PGN via share menu → open Lichess ────
 
-    function sendToLichess() {
+    function getCurrentPgnViaShareMenu() {
         var shareBtn = document.querySelector('[data-cy="sidebar-share-icon"]');
         if (!shareBtn) {
             alert("Could not find the share button on the page.");
-            return;
+            return null;
         }
         shareBtn.click();
 
-        waitForEl(".share-menu-tab-image-component", 8000)
+        return waitForEl(".share-menu-tab-image-component", 8000)
             .then(function () {
                 var tabPgn = document.getElementById("tab-pgn");
                 if (tabPgn) tabPgn.click();
@@ -122,21 +150,32 @@
                 closeShareMenu();
                 if (!pgn) {
                     alert("Could not read the PGN from the game.");
-                    return;
+                    return null;
                 }
-                window.open("https://lichess.org/paste#pgn=" + encodeURIComponent(pgn));
+                return pgn;
             })
             .catch(function () {
                 closeShareMenu();
                 alert("Could not open the share menu or read the PGN.");
+                return null;
             });
+    }
+
+    function sendToLichess() {
+        var result = getCurrentPgnViaShareMenu();
+        if (!result) return;
+
+        Promise.resolve(result).then(function (pgn) {
+            if (!pgn) return;
+            window.open("https://lichess.org/paste#pgn=" + encodeURIComponent(pgn));
+        });
     }
 
     function closeShareMenu() {
         var close = document.querySelector('[data-cy="modal-close"]') ||
-                    document.querySelector('[aria-label="Close"]') ||
-                    document.querySelector('[aria-label="Cerrar"]') ||
-                    document.querySelector("div.icon-font-chess.x.ui_outside-close-icon");
+            document.querySelector('[aria-label="Close"]') ||
+            document.querySelector('[aria-label="Cerrar"]') ||
+            document.querySelector("div.icon-font-chess.x.ui_outside-close-icon");
         if (close) close.click();
     }
 

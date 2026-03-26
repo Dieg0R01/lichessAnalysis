@@ -21,6 +21,8 @@ Depending on your browser and your OS, you have two options.
 ## How to use?
 After you have finished a game on chess.com or when you go to review a game, the script injects an HTML button under the nominal Analysis button. When clicked, it takes you to a Lichess analysis board of the same game.
 
+In the updated version, you will also see a small round button with the Lichess knight icon next to the share button on the chess.com sidebar. This mini button can be used at any moment (during the game or in review) to send the current PGN shown in the share menu to Lichess and open an analysis board of the current position.
+
 ![You'll see a nice new button like below](https://github.com/califernication/lichessAnalysis/blob/main/screenshots/newButtonGif.gif)
 
 ## FAQ
@@ -29,7 +31,9 @@ After you have finished a game on chess.com or when you go to review a game, the
 Yes, Lichess limits import to 100 games per hour when not authenticated (OAuth2). The extension currently does not ask the user to authenticate in order to lessen set up time.
 
 **How does the extension work?**  
-The script scraps your game's PNG from chess.com through the DOM and then sends a POST request to the Lichess API through the api/import endroute. Chess.com's official API is _very_ limited, so getting information from the DOM directly is necessary; currently, there is no way to get a game's PGN through the API. If this ever changes, I will update the source code and the documentation to implement this better practice.
+The script scraps your game's PGN from chess.com through the DOM by opening the share menu and reading the PGN textarea. It then opens `https://lichess.org/paste#pgn=<PGN>` in a new tab. On lichess.org, the extension auto-fills the PGN form and submits it so that a cloud analysis board is opened for that game or position.
+
+Due to CORS restrictions in modern browsers, calling the Lichess `api/import` endpoint directly from a content script is not reliable. Using `lichess.org/paste` as a redirect target keeps all requests within Lichess and avoids these issues while still providing a smooth one-click import experience.
 
 The extension uses [Arrive.js](https://github.com/uzairfarooq/arrive), which abstracts the interface of [mutation observers](https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver), to interact with the DOM efficiently.
 
